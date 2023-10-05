@@ -13,7 +13,7 @@ def calc_coeffs(T,S):
     BT=0.000232 * scl/10.811
     
     # Meshgrid of temperature and salinity
-    [T,S] = np.meshgrid(T,S)
+    # [T,S] = np.meshgrid(T,S)
     
     # some definitions 
     S2 = S * S 
