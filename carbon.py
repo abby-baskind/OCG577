@@ -22,7 +22,7 @@ def pHsolver_TA_DIC(TA = None,
     all in [umol/kg].
     
     Arguments for TA, T, S, and DIC can be of any length as long as they are all the same
-    length as each other and do not have NaN values. 
+    length as each other. 
     
     Required dependencies:
         - calc_coeffs.py: calculates carbonate system coefficients
@@ -54,6 +54,7 @@ def pHsolver_TA_DIC(TA = None,
     import H_poly2 as hpoly2
     import numpy as np 
     import math
+    import numpy.ma as ma
     
     # Check that all the inputs are provided
     if np.asarray(TA).any() == None:
@@ -73,9 +74,9 @@ def pHsolver_TA_DIC(TA = None,
     DIC = correct_dataarray(DIC)
     
         
-    # Check for NaN values
-    if np.isnan(np.min(TA)) or np.isnan(np.min(temperature)) or np.isnan(np.min(salinity)) or np.isnan(np.min(DIC)):
-        raise Exception("No NaN values allowed.") 
+    # # Check for NaN values
+    # if np.isnan(np.min(TA)) or np.isnan(np.min(temperature)) or np.isnan(np.min(salinity)) or np.isnan(np.min(DIC)):
+    #     raise Exception("No NaN values allowed.") 
     
     # Check all input arrays are same size
     if not (TA.size == temperature.size and TA.size == salinity.size and TA.size == DIC.size):
@@ -99,12 +100,12 @@ def pHsolver_TA_DIC(TA = None,
     BT = coeffs['BT']
     
     # Initialize arrays to store results
-    pH = np.zeros(TA.size)
-    H = np.zeros(TA.size)
-    HCO3 = np.zeros(TA.size)
-    CO3 = np.zeros(TA.size)
-    pCO2 = np.zeros(TA.size)
-    co2star = np.zeros(TA.size)
+    pH = np.zeros(TA.shape)
+    H = np.zeros(TA.shape)
+    HCO3 = np.zeros(TA.shape)
+    CO3 = np.zeros(TA.shape)
+    pCO2 = np.zeros(TA.shape)
+    co2star = np.zeros(TA.shape)
     
     # If inputs are size 1 are provided
     if TA.size == 1:
@@ -112,10 +113,11 @@ def pHsolver_TA_DIC(TA = None,
         Hlo = 10**(-pHhi)
         Hmid = np.mean([Hhi,Hlo])
         threshold = Hhi-Hlo
-        while np.abs(threshold) > 5e-23:
+        while np.abs(threshold) > 1e-22:
             Hmid = np.mean([Hhi,Hlo])
             # H, AT, DIC,K1,K2,KB,BT
             sol = hpoly2.H_poly2(Hmid, TA, DIC, k1, k2, kb, BT)
+            print(sol)
             if sol >= 0:
                 Hhi = Hmid
             elif sol < 0:
@@ -124,6 +126,7 @@ def pHsolver_TA_DIC(TA = None,
                 print('mix up')
                 break
             threshold = Hhi-Hlo
+            print(threshold)
         Hmid = np.mean([Hhi,Hlo])
         H = Hmid
         pH = -math.log10(H)
@@ -145,14 +148,14 @@ def pHsolver_TA_DIC(TA = None,
 
     
     # If longer inputs provided
-    else:
+    elif TA.ndim == 1:
         for i in np.arange(0,TA.size)-1: 
             Hhi = 10**(-pHlo)
             phlo = 6
             Hlo = 10**(-pHhi)
             Hmid = np.mean([Hhi,Hlo])
             threshold = Hhi-Hlo
-            while np.abs(threshold) >= 3e-23:
+            while np.abs(threshold) > 1e-19:
                 Hmid = np.mean([Hhi,Hlo])
                 sol = hpoly2.H_poly2(Hmid, TA[i], DIC[i], k1[i], k2[i], kb[i], BT[i])
                 # print(sol)
@@ -164,6 +167,7 @@ def pHsolver_TA_DIC(TA = None,
                     print('mix up')
                     break
                 threshold = Hhi-Hlo
+                # print(threshold)
             Hmid = np.mean([Hhi,Hlo])
             H[i] = Hmid
             pH[i] = -math.log10(H[i])
@@ -182,7 +186,38 @@ def pHsolver_TA_DIC(TA = None,
         
             # k2 = [CO3][H]/[HCO3]
             CO3[i] = (k2[i] * HCO3[i])/H[i]
+            
+    elif TA.ndim == 2:
+        for i in np.arange(0,TA.shape[0]):
+            for j in np.arange(0,TA.shape[1]):
+                Hhi = 10**(-pHlo)
+                Hlo = 10**(-pHhi)
+                Hmid = np.mean([Hhi,Hlo])
+                threshold = Hhi-Hlo
+                while np.abs(threshold) > 1e-19:
+                    Hmid = np.mean([Hhi,Hlo])
+                    sol = hpoly2.H_poly2(Hmid, TA[i,j], DIC[i,j], k1[i,j], k2[i,j], kb[i,j], BT[i,j])
+                    if not ma.is_masked(sol) or not math.isnan(sol):
+                        if sol > 0:
+                            Hhi = Hmid
+                        elif sol <= 0:
+                            Hlo = Hmid
+                        if Hlo > Hhi:
+                            print('mix up')
+                            break
+                        threshold = Hhi-Hlo
+                    else:
+                        threshold = 0
+                        Hhi = np.nan
+                        Hlo = np.nan
+                # print(threshold)
+                Hmid = np.mean([Hhi,Hlo])
+                H[i,j] = Hmid
+                pH[i,j] = -math.log10(H[i,j])
     
+    else:
+        raise Exception("This function currently does not have the capability to process data higher than 2 dimensions.") 
+        
     # Return all the data in a dictionary 
     data = {
         '[H+]': H/1e-6,
@@ -240,6 +275,7 @@ def pHsolver_TA_pCO2(TA = None,
     import H_poly2 as hpoly2
     import numpy as np 
     import math
+    import numpy.ma as ma
     
     # Check that all the inputs are provided
     if np.asarray(TA).any() == None:
@@ -259,9 +295,9 @@ def pHsolver_TA_pCO2(TA = None,
     pCO2 = correct_dataarray(pCO2)
     
         
-    # Check for NaN values
-    if np.isnan(np.min(TA)) or np.isnan(np.min(temperature)) or np.isnan(np.min(salinity)) or np.isnan(np.min(pCO2)):
-        raise Exception("No NaN values allowed.") 
+    # # Check for NaN values
+    # if np.isnan(np.min(TA)) or np.isnan(np.min(temperature)) or np.isnan(np.min(salinity)) or np.isnan(np.min(pCO2)):
+    #     raise Exception("No NaN values allowed.") 
     
     # Check all input arrays are same size
     if not (TA.size == temperature.size and TA.size == salinity.size and TA.size == pCO2.size):
@@ -294,11 +330,11 @@ def pHsolver_TA_pCO2(TA = None,
     co2star = k0 * pCO2
     
     # Initialize arrays to store results
-    pH = np.zeros(TA.size)
-    H = np.zeros(TA.size)
-    HCO3 = np.zeros(TA.size)
-    CO3 = np.zeros(TA.size)
-    Csat = np.zeros(TA.size)
+    pH = np.zeros(TA.shape)
+    H = np.zeros(TA.shape)
+    HCO3 = np.zeros(TA.shape)
+    CO3 = np.zeros(TA.shape)
+    Csat = np.zeros(TA.shape)
     
     # If inputs are size 1 are provided
     if TA.size == 1:
@@ -307,7 +343,7 @@ def pHsolver_TA_pCO2(TA = None,
         Hlo = 10**(-pHhi)
         Hmid = np.mean([Hhi,Hlo])
         threshold = Hhi-Hlo
-        while np.abs(threshold) > 5e-23:
+        while np.abs(threshold) > 1e-22:
             Hmid = np.mean([Hhi,Hlo])
             sol = hpoly.H_poly(Hmid, TA, co2star, k0, k1, k2, kb, BT)
             if sol >= 0:
@@ -330,14 +366,14 @@ def pHsolver_TA_pCO2(TA = None,
         Csat = CO3 + co2star + HCO3 
     
     # If longer inputs provided
-    else:
+    elif TA.ndim == 1:
         for i in np.arange(0,TA.size)-1: 
             Hhi = 10**(-pHlo)
             phlo = 6
             Hlo = 10**(-pHhi)
             Hmid = np.mean([Hhi,Hlo])
             threshold = Hhi-Hlo
-            while np.abs(threshold) > 5e-23:
+            while np.abs(threshold) > 1e-19:
                 Hmid = np.mean([Hhi,Hlo])
                 sol = hpoly.H_poly(Hmid, TA[i], co2star[i], k0[i], k1[i], k2[i], kb[i], BT[i])
                 # print(sol)
@@ -359,6 +395,42 @@ def pHsolver_TA_pCO2(TA = None,
             CO3[i] = (k2[i] * HCO3[i])/H[i]
             # Csat = CO3 + CO2* + HCO3
             Csat[i] = CO3[i] + co2star[i] + HCO3[i]
+            
+    elif TA.ndim == 2:
+        for i in np.arange(0,TA.shape[0]):
+            for j in np.arange(0,TA.shape[1]):
+                Hhi = 10**(-pHlo)
+                Hlo = 10**(-pHhi)
+                Hmid = np.mean([Hhi,Hlo])
+                threshold = Hhi-Hlo
+                while np.abs(threshold) > 1e-19:
+                    Hmid = np.mean([Hhi,Hlo])
+                    sol = hpoly.H_poly(Hmid, TA[i,j], co2star[i,j], k0[i,j], k1[i,j], k2[i,j], kb[i,j], BT[i,j])
+                    if not ma.is_masked(sol) or not math.isnan(sol):
+                        if sol >= 0:
+                            Hhi = Hmid
+                        elif sol < 0:
+                            Hlo = Hmid
+                        if Hlo > Hhi:
+                            print('mix up')
+                            break
+                        threshold = Hhi-Hlo
+                    else:
+                        threshold = 0
+                        Hhi = np.nan
+                        Hlo = np.nan
+                # print(threshold)
+                Hmid = np.mean([Hhi,Hlo])
+                H[i,j] = Hmid
+                pH[i,j] = -math.log10(H[i,j])
+                # K1 = [HCO3][H]/[CO2*]
+                HCO3[i,j] = (k1[i,j] * co2star[i,j])/H[i,j]
+                # k2 = [CO3][H]/[HCO3]
+                CO3[i,j] = (k2[i,j] * HCO3[i,j])/H[i,j]
+                # Csat = CO3 + CO2* + HCO3
+                Csat[i,j] = CO3[i,j] + co2star[i,j] + HCO3[i,j]
+    else:
+        raise Exception("This function currently does not have the capability to process data higher than 2 dimensions.") 
     
     # Return all the data in a dictionary 
     data = {
@@ -394,13 +466,15 @@ def pHsolver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kw
             function [k1,k2,k0,kb,kw,BT]=calc_coeffs(T,S)
             T   = temperature (degrees C)
             S   = salinity (PSU)
-        - H_poly.py: H polynomial root finder
+        - H_poly.py: H polynomial root finder for pCO2
+        - H_poly2.py: H polynomial root finder for DIC
     
     Inputs:
-        - total alkalinity in umol/kg
-        - pCO2 in uatm
-        - temperature in °C
-        - salinity in PSU
+        - "TA": total alkalinity in umol/kg
+        - "pCO2": pCO2 in uatm
+        - "DIC": dissolved inorganic carbon in umol/kg
+        - "temperature" in °C
+        - "salinity" in PSU
         - OPTIONAL: pHlo and pHhi in total scale
             - if pHlo and pHhi not provided, default to 6 and 9
     
@@ -418,14 +492,21 @@ def pHsolver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kw
     import H_poly2 as hpoly2
     import numpy as np 
     import math
+    import numpy.ma as ma
     
     # If pH limits are not explicitly stated
     # Default to 6 and 9
-    if pHlo == None or pHhi == None:
-        pHhi = 9
+    if pHlo == None:
         pHlo = 6
+    if pHhi == None:
+        pHhi = 9
+        
         
     temperature = correct_dataarray(temperature)
+    
+    if not 'TA' in kwargs:
+        if not 'pCO2' in kwargs or not 'DIC' in kwargs:
+            raise KeyError('Insufficient arguments provided. Please provide either (A) TA and pCO2 or (B) TA and DIC.')
     
     
     if temperature.size >= 1:
