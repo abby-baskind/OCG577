@@ -558,7 +558,7 @@ def pHsolver_TA_DIC(TA = None,
                 while np.abs(threshold) > 1e-19:
                     Hmid = np.mean([Hhi,Hlo])
                     sol = hpoly2.H_poly2(Hmid, TA[i,j], DIC[i,j], k1[i,j], k2[i,j], kb[i,j], BT[i,j])
-                    if not ma.is_masked(sol) or not math.isnan(sol):
+                    if not ma.is_masked(sol):
                         if sol > 0:
                             Hhi = Hmid
                         elif sol <= 0:
@@ -575,6 +575,21 @@ def pHsolver_TA_DIC(TA = None,
                 Hmid = np.mean([Hhi,Hlo])
                 H[i,j] = Hmid
                 pH[i,j] = -math.log10(H[i,j])
+                
+                # Calculate pCO2 using DIC and H
+                # pCO2 = [DIC / k0] * [H^2 / (H^2 + k1 * H + k1k2)]
+                # Sarmiento & Gruber (2006) Table 8.2.1 Eq 16
+                pCO2[i,j] = (DIC[i,j] / k0[i,j]) * ((H[i,j]**2)/(H[i,j]**2 + k1[i,j] * H[i,j] + k1[i,j] * k2[i,j]))
+
+                # Calculate CO2* from pCO2
+                # K0 = [CO2*]/pCO2
+                co2star[i,j] = k0[i,j] * pCO2[i,j]
+        
+                # K1 = [HCO3][H]/[CO2*]
+                HCO3[i,j] = (k1[i,j] * co2star[i,j])/H[i,j]
+        
+                # k2 = [CO3][H]/[HCO3]
+                CO3[i,j] = (k2[i,j] * HCO3[i,j])/H[i,j]
     
     else:
         raise Exception("This function currently does not have the capability to process data higher than 2 dimensions.") 
@@ -620,21 +635,21 @@ def pHsolver_TA_DIC(TA = None,
         
     # Return all the data in a dictionary 
     data = {
-        '[H+]': H,
+        '[H+]': H*1e6,
         'pH': pH,
-        '[HCO3]': HCO3,
-        '[CO3]': CO3,
-        '[CO2*]': co2star,
-        'pCO2': pCO2,
-        'DIC': DIC,
-        'TA': TA,
+        '[HCO3]': HCO3*1e6,
+        '[CO3]': CO3*1e6,
+        '[CO2*]': co2star*1e6,
+        'pCO2': pCO2*1e6,
+        'DIC': DIC*1e6,
+        'TA': TA*1e6,
         'k0': k0,
         'k1': k1,
         'k2': k2,
         'kw': kw,
         'kb': kb,
-        'BT': BT,
-        'OH': OH,
+        'BT': BT*1e6,
+        'OH': OH*1e6,
         'BOH4': BOH4,
         'OmegaAr': OmegaAr,
         'KAr': KAr,
