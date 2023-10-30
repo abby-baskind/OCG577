@@ -590,9 +590,47 @@ def pHsolver_TA_DIC(TA = None,
         
                 # k2 = [CO3][H]/[HCO3]
                 CO3[i,j] = (k2[i,j] * HCO3[i,j])/H[i,j]
-    
+    elif TA.ndim == 3:
+        for i in np.arange(0,TA.shape[0]):
+            for j in np.arange(0,TA.shape[1]):
+                for k in np.arange(0,TA.shape[2]):
+                    Hhi = 10**(-pHlo)
+                    Hlo = 10**(-pHhi)
+                    Hmid = np.mean([Hhi,Hlo])
+                    threshold = Hhi-Hlo
+                    while np.abs(threshold) > 1e-19:
+                        Hmid = np.mean([Hhi,Hlo])
+                        sol = hpoly2.H_poly2(Hmid, TA[i,j,k], DIC[i,j,k], k1[i,j,k], k2[i,j,k], kb[i,j,k], BT[i,j,k])
+                        if not ma.is_masked(sol) or not math.isnan(sol):
+                            if sol > 0:
+                                Hhi = Hmid
+                            elif sol <= 0:
+                                Hlo = Hmid
+                            if Hlo > Hhi:
+                                print('mix up')
+                                break
+                            threshold = Hhi-Hlo
+                        else:
+                            threshold = 0
+                            Hhi = np.nan
+                            Hlo = np.nan
+                    # print(threshold)
+                    Hmid = np.mean([Hhi,Hlo])
+                    H[i,j,k] = Hmid
+                    pH[i,j,k] = -math.log10(H[i,j])
+                    # Calculate pCO2 using DIC and H
+                    # pCO2 = [DIC / k0] * [H^2 / (H^2 + k1 * H + k1k2)]
+                    # Sarmiento & Gruber (2006) Table 8.2.1 Eq 16
+                    pCO2[i,j,k] = (DIC[i,j,k] / k0[i,j,k]) * ((H[i,j,k]**2)/(H[i,j,k]**2 + k1[i,j,k] * H[i,j,k] + k1[i,j,k] * k2[i,j,k]))
+                    # Calculate CO2* from pCO2
+                    # K0 = [CO2*]/pCO2
+                    co2star[i,j,k] = k0[i,j,k] * pCO2[i,j,k]
+                    # K1 = [HCO3][H]/[CO2*]
+                    HCO3[i,j,k] = (k1[i,j,k] * co2star[i,j,k])/H[i,j,k]
+                    # k2 = [CO3][H]/[HCO3]
+                    CO3[i,j,k] = (k2[i,j,k] * HCO3[i,j,k])/H[i,j,k]
     else:
-        raise Exception("This function currently does not have the capability to process data higher than 2 dimensions.") 
+        raise Exception("This function currently does not have the capability to process data higher than 3 dimensions.") 
         
     # Aragonite saturation Ωarag
     # # Sarmiento & Gruber 2006, Eq. 9.3.2
@@ -854,8 +892,42 @@ def pHsolver_TA_pCO2(TA = None,
                 CO3[i,j] = (k2[i,j] * HCO3[i,j])/H[i,j]
                 # Csat = CO3 + CO2* + HCO3
                 Csat[i,j] = CO3[i,j] + co2star[i,j] + HCO3[i,j]
+    elif TA.ndim == 3:
+        for i in np.arange(0,TA.shape[0]):
+            for j in np.arange(0,TA.shape[1]):
+                for k in np.arange(0,TA.shape[2]):
+                    Hhi = 10**(-pHlo)
+                    Hlo = 10**(-pHhi)
+                    Hmid = np.mean([Hhi,Hlo])
+                    threshold = Hhi-Hlo
+                    while np.abs(threshold) > 1e-19:
+                        Hmid = np.mean([Hhi,Hlo])
+                        sol = hpoly.H_poly(Hmid, TA[i,j,k], co2star[i,j,k], k0[i,j,k], k1[i,j,k], k2[i,j,k], kb[i,j,k], BT[i,j,k])
+                        if not ma.is_masked(sol) or not math.isnan(sol):
+                            if sol >= 0:
+                                Hhi = Hmid
+                            elif sol < 0:
+                                Hlo = Hmid
+                            if Hlo > Hhi:
+                                print('mix up')
+                                break
+                            threshold = Hhi-Hlo
+                        else:
+                            threshold = 0
+                            Hhi = np.nan
+                            Hlo = np.nan
+                    # print(threshold)
+                    Hmid = np.mean([Hhi,Hlo])
+                    H[i,j,k] = Hmid
+                    pH[i,j,k] = -math.log10(H[i,j])
+                    # K1 = [HCO3][H]/[CO2*]
+                    HCO3[i,j,k] = (k1[i,j,k] * co2star[i,j,k])/H[i,j,k]
+                    # k2 = [CO3][H]/[HCO3]
+                    CO3[i,j,k] = (k2[i,j,k] * HCO3[i,j,k])/H[i,j,k]
+                    # Csat = CO3 + CO2* + HCO3
+                    Csat[i,j,k] = CO3[i,j,k] + co2star[i,j,k] + HCO3[i,j,k]
     else:
-        raise Exception("This function currently does not have the capability to process data higher than 2 dimensions.") 
+        raise Exception("This function currently does not have the capability to process data higher than 3 dimensions.") 
     
     # Aragonite saturation Ωarag
     # # Sarmiento & Gruber 2006, Eq. 9.3.2
@@ -912,12 +984,7 @@ def pHsolver_TA_pCO2(TA = None,
 def solver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kwargs):
     
     """
-    This function, as it is currently written, takes TA [umol/kg], temperature [degC], 
-    salinity [PSU], and pCO2 [uatm] to solve for pH [total] and HCO3, CO3, CO2*, and DIC,
-    all in [umol/kg].
-    
-    Arguments for TA, T, S, and pCO2 can be of any length as long as they are all the same
-    length as each other and do not have NaN values. 
+    This function is a wrapper function that eventually solves the marine carbonate system. Depending on the input arguments, it calls one of the following: [A] pHsolver_TA_pCO2(), [B] pHsolver_TA_DIC(), [C] pHsolver_pH_TA(), [D] pHsolver_pH_DIC(), or [E] pHsolver_pH_pCO2.
     
     Required dependencies:
         - calc_coeffs.py: calculates carbonate system coefficients
@@ -926,6 +993,9 @@ def solver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kwar
             S   = salinity (PSU)
         - H_poly.py: H polynomial root finder for pCO2
         - H_poly2.py: H polynomial root finder for DIC
+        - numpy
+        - math
+        - numpy.ma
     
     Inputs:
         - 2 of the following:
@@ -957,6 +1027,14 @@ def solver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kwar
         - Aragonite saturation (OmegaAr)
         - Aragonite solubility (KAr)
         - approximate Revelle factor
+        
+    Sources:
+        - Riley, J. P., & Tongudai, M. (1967). The major cation/chlorinity ratios in sea water. Chemical Geology, 2, 263-269.
+        - Friis, K., Körtzinger, A., & Wallace, D. W. (2003). The salinity normalization of marine inorganic carbon chemistry data. Geophysical Research Letters, 30(2).
+        - Mucci, A. (1983). The solubility of calcite and aragonite in seawater at various salinities, temperatures, and one atmosphere total pressure. Am. J. Sci, 283(7), 780-799.
+        - Millero, F. J. (1995). Thermodynamics of the carbon dioxide system in the oceans. Geochimica et Cosmochimica Acta, 59(4), 661-677.
+        - Weiss, R. (1974). Carbon dioxide in water and seawater: the solubility of a non-ideal gas. Marine chemistry, 2(3), 203-215.
+        - Wanninkhof, R. (2014). Relationship between wind speed and gas exchange over the ocean revisited. Limnology and Oceanography: Methods, 12(6), 351-362.
     """
     
     import calc_coeffs as co2
@@ -1020,25 +1098,233 @@ def solver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kwar
                                    pH = pH)
         else: 
             raise KeyError('Insufficient arguments provided. Please provide either \n(A) TA and pCO2, \n(B) TA and DIC, \n(C) TA and pH, \n(D) DIC and pH or \n(E) pCO2 and pH.')
-    elif temperature.size < 1:
+            
+        if 'O2' in kwargs:
+            O2 = kwargs.get('O2')
+            # Reference Salinity
+            # Default = 35 PSU
+            if 'Sref' in kwargs:
+                Sref = kwargs.get('Sref')
+            else:
+                Sref = 35
     
-        if 'TA' in kwargs and 'pCO2' in kwargs:
-            TA = kwargs.get('TA')
-            pCO2 = kwargs.get('pCO2')
-            data = pHsolver_TA_pCO2(TA = TA, 
-                                    temperature = temperature, 
-                                    salinity = salinity, 
-                                    pCO2 = pCO2, 
-                                    pHlo = pHlo, pHhi = pHhi)
-        if 'TA' in kwargs and 'DIC' in kwargs:
-            TA = kwargs.get('TA')
-            DIC = kwargs.get('DIC')
-            data = pHsolver_TA_DIC(TA = TA, 
-                                   temperature = temperature, 
-                                   salinity = salinity, 
-                                   DIC = DIC, 
-                                   pHlo = pHlo, pHhi = pHhi)
-    return data
+            # Reference salinity normalized alkalinity
+            # Default = 2298 umol/kg
+            # from Chen et al (2022)
+            if 'sAlkref' in kwargs:
+                sAlkref = kwargs.get('sAlkref')
+            else:
+                sAlkref = 2298 #umol/kg, Chen et al, 2022
+    
+            # Reference salinity normalized DIC
+            # Default = 1967 umol/kg
+            # from Chen et al (2022)
+            if 'sDICref' in kwargs:
+                sDICref = kwargs.get('sDICref')
+            else:
+                sDICref = 1967 #umol/kg, Chen et al, 2022
+    
+            # Estimation of Cant in the surface ocean
+            # https://bg.copernicus.org/articles/10/2169/2013/bg-10-2169-2013.pdf
+            # S. Khatiwala et al (2013, Biogeosciences): See figure 4
+            if 'Cant' in kwargs:
+                Cant = kwargs.get('Cant')
+            else:
+                Cant = 40
+                
+            data2 = pumps(data['TA'], data['DIC'], temperature, salinity, O2, 
+                          Sref = Sref, sAlkref = sAlkref, sDICref = sDICref, Cant = Cant)
+        else:
+            data2 = {}
+            
+        DATA = {**data, **data2}
+
+    return DATA
+
+def pumps(TA, DIC, T, S, O2, **kwargs):
+    
+    # Reference Salinity
+    # Default = 35 PSU
+    if 'Sref' in kwargs:
+        Sref = kwargs.get('Sref')
+    else:
+        Sref = 35
+    
+    # Reference salinity normalized alkalinity
+    # Default = 2298 umol/kg
+    # from Chen et al (2022)
+    if 'sAlkref' in kwargs:
+        sAlkref = kwargs.get('sAlkref')
+    else:
+        sAlkref = 2298 #umol/kg, Chen et al, 2022
+    
+    # Reference salinity normalized DIC
+    # Default = 1967 umol/kg
+    # from Chen et al (2022)
+    if 'sDICref' in kwargs:
+        sDICref = kwargs.get('sDICref')
+    else:
+        sDICref = 1967 #umol/kg, Chen et al, 2022
+    
+    # Estimation of Cant in the surface ocean
+    # https://bg.copernicus.org/articles/10/2169/2013/bg-10-2169-2013.pdf
+    # S. Khatiwala et al (2013, Biogeosciences): See figure 4
+    if 'Cant' in kwargs:
+        Cant = kwargs.get('Cant')
+    else:
+        Cant = 40 
+    
+    TA = correct_dataarray(TA)
+    T = correct_dataarray(T)
+    S = correct_dataarray(S)
+    DIC = correct_dataarray(DIC)
+    O2 = correct_dataarray(O2)
+    
+    O2sat = o2sat(T,S)
+    AOU = O2sat - O2
+    
+    # Redfield ratio 
+    # C:N:P:O2
+    # 117:16:1:150
+    C = 117
+    N = 16
+    P = 1
+    O = 150
+    CtoO2 = C/O
+    TAtoO2 = (N + P)/O2
+    TAtoC = (N + P)/C
+    
+    # Soft tissue pump
+    # Roughly based on Sarmiento & Gruber 2006, Eq. 8.4.1 but in terms of O2
+    dCsoft = CtoO2 * AOU
+    dTAsoft = -TAtoO2 * AOU
+    
+    # Salinity normalization
+    # nX = (X/S) * Sref
+    # Sarmiento & Gruber (2006) and Chen et al (2022) use Sref = 35
+    sDIC = (DIC/S) * Sref
+    sAlk = (TA/S) * Sref
+    
+    # Carbonate pump
+    dCcarb = 0.5 * (sAlk - sAlkref)
+    dTAcarb = sAlk - sAlkref - dTAsoft
+    
+    # Gas exchange
+    dCgas = sDIC - sDICref - Cant - dCsoft - dCcarb
+    dTAgas = -TAtoC * dCgas
+    
+    data2 = {
+        'S_ref': Sref,
+        'sDIC': sDIC,
+        'sDIC_ref': sDICref,
+        'sAlk': sAlk,
+        'sAlk_ref': sAlkref,
+        'C_ant': Cant,
+        '∆C_soft': dCsoft,
+        '∆TA_soft': dTAsoft,
+        'O2_sat': O2sat,
+        'AOU': AOU,
+        '∆C_carb': dCcarb,
+        '∆TA_carb': dTAcarb,
+        '∆C_gasex': dCgas,
+        '∆TA_gasex': dTAgas,
+        'C:O2': CtoO2,
+        'TA:O2': TAtoO2,
+        'TA:C': TAtoC,
+        }
+    return data2
+
+def o2sat(temp, S):
+    
+    import numpy as np
+    
+    """
+    This function computes oxygen solubility in seawater in umol/kg according to Garcia and Gordon (1992). Results are valid for 0°C ≤ T ≤ 40°C and 0 PSU ≤ S ≤ 42 PSU.
+    
+    Usage is as follows:
+        o2_sat = o2sat(temperature, salinity),
+        where o2_sat is oxygen saturation in umol/kg,
+        temperature is in °C, and salinity in PSU.
+    
+    Source:
+        Garcia, H. E., & Gordon, L. I. (1992). Oxygen solubility in seawater: Better fitting equations. Limnology and oceanography, 37(6), 1307-1312.
+    """
+    
+    A0 = 5.80818
+    A1 = 3.20684
+    A2 = 4.11890
+    A3 = 4.93845
+    A4 = 1.01567
+    A5 = 1.41575
+    B0 = -7.01211e-3
+    B1 = -7.25958e-3
+    B2 = -7.93334e-3
+    B3 = -5.54491e-3
+    C0 = -1.32412e-7
+    
+    T = np.log((298.15 - temp)*(273.15 + temp)**(-1))
+    
+    lnC = A0 + (A1 * T) + (A2 * T**2) + (A3 * T**3) + (A4 * T**4) + (A5 * T**5) + \
+        S * (B0 + (B1 * T) + (B2 * T**2) + (B3 * T**3)) + C0 * S**2
+    C = np.exp(lnC)
+    
+    return C
+
+def density_1atm(T,S):
+    
+    """
+    This function calculates the density (kg/m^3) of seawater at 1atm of pressure using temperature (°C) and salinity (PSU).
+    
+    The equation of state is of the form:
+        rho = rho0 + AS + BS^(3/2) + CS
+        rho0 = a + bT + cT^2 + dT^3 + eT^4 + fT^5
+        A = g + hT + iT^2 + jT^3 + kT^4
+        B = l + mT + nT^2
+        C = constant
+    
+    Usage is as follows:
+        rho = density_1atm(temperature, salinity),
+        where rho is density at 1atm in kg/m^3,
+        temperature is in °C, and salinity in PSU.
+        
+    Source:
+        Millero, F. J., & Poisson, A. (1981). International one-atmosphere equation of state of seawater. Deep Sea Research Part A. Oceanographic Research Papers, 28(6), 625-629.
+    """
+    
+    # Reference density calculation 
+    # Bigg, 1967, British Journal of Applied Physics, 8, 521–537
+    a = 999.842594
+    b = 6.793952e-2
+    c = -9.095290e-3
+    d = 1.001685e-4
+    e = -1.120083e-6
+    f = 6.536339e-9
+    rho0 = a + (b * T) + (c * T**2) + (d * T**3) + (e * T**4) + (f * T**5)
+    
+    # First coeff A
+    g = 8.24493e-1
+    h = -4.0899e-3
+    i = 7.6438e-5
+    j = -8.2467e-7
+    k = 5.3875e-9
+    A = g + (h * T) + (i * T**2) + (j * T**3) + (k * T**4)
+    
+    # Second coeff B
+    l = -5.72466e-3
+    m = 1.0227e-4
+    n = -1.6546e-6
+    B = l + (m * T) + (n * T**2)
+    
+    # Third coeff C
+    C = 4.8313e-4
+    
+    # Equation of state
+    rho = rho0 + (A * S) + (B * np.power(S, 1.5)) + (C * S)
+    
+    return rho
+    
+    
+    
         
     
 
