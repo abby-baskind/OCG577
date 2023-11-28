@@ -1099,8 +1099,23 @@ def solver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kwar
         else: 
             raise KeyError('Insufficient arguments provided. Please provide either \n(A) TA and pCO2, \n(B) TA and DIC, \n(C) TA and pH, \n(D) DIC and pH or \n(E) pCO2 and pH.')
             
-        if 'O2' in kwargs:
-            O2 = kwargs.get('O2')
+        if 'PO4' in kwargs:
+            PO4 = kwargs.get('PO4')
+            
+            # Reference Salinity
+            # Default = 35 PSU
+            if 'PO4ref' in kwargs:
+                PO4ref = kwargs.get('PO4ref')
+            else:
+                PO4ref = 0.1
+                
+            # Depth
+            # Defaults to 0 for surface
+            if 'z' in kwargs:
+                z = kwargs.get('z')
+            else:
+                z = 0
+            
             # Reference Salinity
             # Default = 35 PSU
             if 'Sref' in kwargs:
@@ -1111,18 +1126,62 @@ def solver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kwar
             # Reference salinity normalized alkalinity
             # Default = 2298 umol/kg
             # from Chen et al (2022)
-            if 'sAlkref' in kwargs:
-                sAlkref = kwargs.get('sAlkref')
+            if 'Alkref' in kwargs:
+                Alkref = kwargs.get('Alkref')
             else:
-                sAlkref = 2298 #umol/kg, Chen et al, 2022
+                Alkref = 2298 #umol/kg, Chen et al, 2022
     
             # Reference salinity normalized DIC
             # Default = 1967 umol/kg
             # from Chen et al (2022)
-            if 'sDICref' in kwargs:
-                sDICref = kwargs.get('sDICref')
+            if 'DICref' in kwargs:
+                DICref = kwargs.get('DICref')
             else:
-                sDICref = 1967 #umol/kg, Chen et al, 2022
+                DICref = 1967 #umol/kg, Chen et al, 2022
+    
+            # Estimation of Cant in the surface ocean
+            # https://bg.copernicus.org/articles/10/2169/2013/bg-10-2169-2013.pdf
+            # S. Khatiwala et al (2013, Biogeosciences): See figure 4
+            if 'Cant' in kwargs:
+                Cant = kwargs.get('Cant')
+            else:
+                Cant = 40
+                
+            data2 = pumpsPO4(data['TA'], data['DIC'], temperature, salinity, PO4, 
+                          Sref = Sref, Alkref = Alkref, DICref = DICref, Cant = Cant, PO4ref = PO4ref, z = z)
+            
+        elif 'O2' in kwargs:
+            O2 = kwargs.get('O2')
+            
+            # Depth
+            # Defaults to 0 for surface
+            if 'z' in kwargs:
+                z = kwargs.get('z')
+            else:
+                z = 0
+                
+            # Reference Salinity
+            # Default = 35 PSU
+            if 'Sref' in kwargs:
+                Sref = kwargs.get('Sref')
+            else:
+                Sref = 35
+    
+            # Reference salinity normalized alkalinity
+            # Default = 2298 umol/kg
+            # from Chen et al (2022)
+            if 'Alkref' in kwargs:
+                Alkref = kwargs.get('Alkref')
+            else:
+                Alkref = 2298 #umol/kg, Chen et al, 2022
+    
+            # Reference salinity normalized DIC
+            # Default = 1967 umol/kg
+            # from Chen et al (2022)
+            if 'DICref' in kwargs:
+                DICref = kwargs.get('DICref')
+            else:
+                DICref = 1967 #umol/kg, Chen et al, 2022
     
             # Estimation of Cant in the surface ocean
             # https://bg.copernicus.org/articles/10/2169/2013/bg-10-2169-2013.pdf
@@ -1133,7 +1192,7 @@ def solver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kwar
                 Cant = 40
                 
             data2 = pumps(data['TA'], data['DIC'], temperature, salinity, O2, 
-                          Sref = Sref, sAlkref = sAlkref, sDICref = sDICref, Cant = Cant)
+                          Sref = Sref, Alkref = Alkref, DICref = DICref, Cant = Cant, z = z)
         else:
             data2 = {}
             
@@ -1153,18 +1212,18 @@ def pumps(TA, DIC, T, S, O2, **kwargs):
     # Reference salinity normalized alkalinity
     # Default = 2298 umol/kg
     # from Chen et al (2022)
-    if 'sAlkref' in kwargs:
-        sAlkref = kwargs.get('sAlkref')
+    if 'Alkref' in kwargs:
+        Alkref = kwargs.get('Alkref')
     else:
-        sAlkref = 2298 #umol/kg, Chen et al, 2022
+        Alkref = 2298 #umol/kg, Chen et al, 2022
     
     # Reference salinity normalized DIC
     # Default = 1967 umol/kg
     # from Chen et al (2022)
-    if 'sDICref' in kwargs:
-        sDICref = kwargs.get('sDICref')
+    if 'DICref' in kwargs:
+        DICref = kwargs.get('DICref')
     else:
-        sDICref = 1967 #umol/kg, Chen et al, 2022
+        DICref = 1967 #umol/kg, Chen et al, 2022
     
     # Estimation of Cant in the surface ocean
     # https://bg.copernicus.org/articles/10/2169/2013/bg-10-2169-2013.pdf
@@ -1173,6 +1232,11 @@ def pumps(TA, DIC, T, S, O2, **kwargs):
         Cant = kwargs.get('Cant')
     else:
         Cant = 40 
+        
+    if 'z' in kwargs:
+        z = kwargs.get('z')
+    else:
+        z = 0
     
     TA = correct_dataarray(TA)
     T = correct_dataarray(T)
@@ -1205,6 +1269,15 @@ def pumps(TA, DIC, T, S, O2, **kwargs):
     sDIC = (DIC/S) * Sref
     sAlk = (TA/S) * Sref
     
+    # Salinity normalization
+    # nX = (X/S) * Sref
+    # Sarmiento & Gruber (2006) and Chen et al (2022) use Sref = 35
+    sDICref = (DICref/S) * Sref
+    sAlkref = (sAlkref/S) * Sref
+    
+    # Calculate Cant with depth
+    C_ant = Cant * np.exp(0.003 * (-1 * z))
+    
     # Carbonate pump
     dCcarb = 0.5 * (sAlk - sAlkref)
     dTAcarb = sAlk - sAlkref - dTAsoft
@@ -1219,7 +1292,7 @@ def pumps(TA, DIC, T, S, O2, **kwargs):
         'sDIC_ref': sDICref,
         'sAlk': sAlk,
         'sAlk_ref': sAlkref,
-        'C_ant': Cant,
+        'C_ant': np.asarray(C_ant),
         '∆C_soft': dCsoft,
         '∆TA_soft': dTAsoft,
         'O2_sat': O2sat,
@@ -1231,6 +1304,135 @@ def pumps(TA, DIC, T, S, O2, **kwargs):
         'C:O2': CtoO2,
         'TA:O2': TAtoO2,
         'TA:C': TAtoC,
+        }
+    return data2
+
+def pumpsPO4(TA, DIC, T, S, PO4, **kwargs):
+    
+    if 'PO4ref' in kwargs:
+        PO4ref = kwargs.get('PO4ref')
+    else:
+        PO4ref = 0.1
+    
+    # Reference Salinity
+    # Default = 35 PSU
+    if 'Sref' in kwargs:
+        Sref = kwargs.get('Sref')
+    else:
+        Sref = 35
+    
+    # Reference salinity normalized alkalinity
+    # Default = 2298 umol/kg
+    # from Chen et al (2022)
+    if 'Alkref' in kwargs:
+        Alkref = kwargs.get('Alkref')
+    else:
+        Alkref = 2298 #umol/kg, Chen et al, 2022
+    
+    # Reference salinity normalized DIC
+    # Default = 1967 umol/kg
+    # from Chen et al (2022)
+    if 'DICref' in kwargs:
+        DICref = kwargs.get('DICref')
+    else:
+        DICref = 1967 #umol/kg, Chen et al, 2022
+    
+    # Estimation of Cant in the surface ocean
+    # https://bg.copernicus.org/articles/10/2169/2013/bg-10-2169-2013.pdf
+    # S. Khatiwala et al (2013, Biogeosciences): See figure 4
+    if 'Cant' in kwargs:
+        Cant = kwargs.get('Cant')
+    else:
+        Cant = 40 
+    
+    if 'z' in kwargs:
+        z = kwargs.get('z')
+    else:
+        z = 0
+    
+    TA = correct_dataarray(TA)
+    T = correct_dataarray(T)
+    S = correct_dataarray(S)
+    DIC = correct_dataarray(DIC)
+    PO4 = correct_dataarray(PO4)
+    
+    # Redfield ratio 
+    # C:N:P:O2
+    # 117:16:1:150
+    C = 117
+    N = 16
+    P = 1
+    O = 150
+    CtoP = C/P
+    NtoC = N/C
+    PtoO2 = P/O
+    TAtoO2 = (N + P)/O
+    TAtoC = (N + P)/C
+    
+    # Salinity normalization
+    # nX = (X/S) * Sref
+    # Sarmiento & Gruber (2006) and Chen et al (2022) use Sref = 35
+    sDIC = (DIC/S) * Sref
+    sDICref = (DICref/S) * Sref
+    sAlk = (TA/S) * Sref
+    sAlkref = (Alkref/S) * Sref
+    sPO4 = (PO4/S) * Sref
+    sPO4ref = (PO4ref/S) * Sref
+    
+    # Deviation from reference value
+    # ∆X = sX − sXref (Chen et al, 2022)
+    dPO4 = sPO4 - sPO4ref
+    dDIC = sDIC - sDICref
+    dTA = sAlk - sAlkref
+    
+    # Soft tissue pump (Chen et al 2022)
+    # ∆DICsoft = (C/P) * ∆PO4
+    # ∆Alksoft = (-N/C) * ∆DICsoft
+    dCsoft = CtoP * dPO4
+    dTAsoft = -NtoC * dCsoft
+    
+#     # From Chen et al:
+#     # "In order to illustrate this process, 
+#     # we here compute the fraction of the soft-tissue pump 
+#     # that is associated with directly accumulated carbon (Faccum) 
+#     # and the fraction that is associated with recirculated carbon (Frecirc) 
+#     # using the apparent oxygen utilization (AOU) following Williams and Follows (2011) as:
+#     # Faccum = ((P/O)*AOU)/dPO4
+#     # Frecirc = 1 - Faccum
+#     O2sat = o2sat(T,S)
+#     AOU = O2sat - O2
+#     Faccum = (PtoO2 * AOU)/dPO4
+#     Frecirc = 1 - Faccum
+    
+    # Carbonate pump
+    # ∆Alkcarb = ∆Alk - ∆Alksoft
+    # ∆DICcarb = 0.5 ∆Alkcarb
+    dTAcarb = dTA - dTAsoft
+    dCcarb = 0.5 * dTAcarb
+    
+    # Gas exchange
+    dCgas = sDIC - sDICref - Cant - dCsoft - dCcarb
+    dTAgas = -TAtoC * dCgas
+    
+    # Calculate Cant with depth
+    C_ant = Cant * np.exp(0.003 * (-1 * z))
+    
+    data2 = {
+        'S_ref': Sref,
+        'sDIC': sDIC,
+        'sDIC_ref': sDICref,
+        'sAlk': sAlk,
+        'sAlk_ref': sAlkref,
+        'C_ant': np.asarray(C_ant),
+        '∆C_soft': dCsoft,
+        '∆TA_soft': dTAsoft,
+        '∆C_carb': dCcarb,
+        '∆TA_carb': dTAcarb,
+        '∆C_gasex': dCgas,
+        '∆TA_gasex': dTAgas,
+        'sPO4': sPO4,
+        'sPO4ref': sPO4ref,
+        '∆PO4': dPO4
         }
     return data2
 
