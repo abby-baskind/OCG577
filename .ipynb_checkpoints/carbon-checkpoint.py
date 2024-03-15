@@ -774,8 +774,8 @@ def pHsolver_TA_pCO2(TA = None,
     # Check magnitude of TA and pCO2 to guess if units are right
     if not TA.min() > 1:
         raise Exception('This function takes TA units of umol/kg. Based on the magnitude of your input, we assume you entered TA in mol/kg.')
-    if not pCO2.min() > 1:
-        raise Exception('This function takes pCO2 units of uatm. Based on the magnitude of your input, we assume you entered pCO2 in atm.')
+    # if not pCO2.min() > 1:
+    #     raise Exception('This function takes pCO2 units of uatm. Based on the magnitude of your input, we assume you entered pCO2 in atm.')
     TA = TA*1e-6
     pCO2 = pCO2*1e-6
     
@@ -951,16 +951,32 @@ def pHsolver_TA_pCO2(TA = None,
     
     Revelle = (3 * TA * Csat - 2 * Csat**2)/((2*Csat - TA)*(TA - Csat))
     
+     # Solve for OH
+    # # kw = [H][OH]
+    # # kw/[H] = [OH]
+    OH = kw/H
+    
+    # Solve for B(OH)4
+    # # kb = [H][BOH4]/[H3BO3]
+    # # TB = BOH4 + H3BO3
+    # # H3BO3 = TB - BOH4
+    # # kb = [H][BOH4]/(TB - BOH4)
+    # # kb * TB - kb * BOH4 = [H][BOH4]
+    # # kb  * TB = kb * BOH4 + H * BOH4
+    # # kb * TB = BOH4 (kb + H)
+    # # BOH4 = (kb * TB) / (H + kb)
+    BOH4 = ((kb * BT)/(H * kb))*1e-6
+    
     # Return all the data in a dictionary 
     data = {
-        '[H+]': H,
+        '[H+]': H*1e6,
         'pH': pH,
-        '[HCO3]': HCO3,
-        '[CO3]': CO3,
-        '[CO2*]': co2star,
-        'pCO2': pCO2,
-        'DIC': DIC,
-        'TA': TA,
+        '[HCO3]': HCO3*1e6,
+        '[CO3]': CO3*1e6,
+        '[CO2*]': co2star*1e6,
+        'pCO2': pCO2*1e6,
+        'DIC': Csat*1e6,
+        'TA': TA*1e6,
         'k0': k0,
         'k1': k1,
         'k2': k2,
@@ -1008,6 +1024,30 @@ def solver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kwar
         - "salinity" in PSU
         - OPTIONAL: pHlo and pHhi in total scale
             - if pHlo and pHhi not provided, default to 6 and 9
+        - For pump calculations using PO4:
+            - "PO4"
+            - OPTIONAL
+                - "PO4ref" -- defaults to 0.1 umol/kg
+                - "Alkref" -- defaults to the mean of input TA
+                - "DICref" -- defaults to the mean of input DIC
+                - "Sref" -- defaults to 35 PSU
+                - For TTD Cant calculation (assumes pCO2(t = present) = 410ppm and pCO2(t = preindustrial) = 280ppm)
+                    - "CFC12"
+                    - "O2" -- required for calculation of preformed alkalinity
+                    - "CFCref" referenced to 1950
+                    - "t" for time in years -- defaults to 0
+                    - "z" for depth in meters -- defaults to 0
+                - For crude parameterization of Cant
+                    - "z" for depth in meters
+                    - "Cant" for surface Cant -- defaults to 40 umol/kg
+        - For pump calculations using O2
+            - "O2"
+            - OPTIONAL
+                - "Alkref" -- defaults to the mean of input TA
+                - "DICref" -- defaults to the mean of input DIC
+                - "Sref" -- defaults to 35 PSU
+                - "Cant" for surface Cant -- defaults to 40 umol/kg
+                - "z" for depth in meters -- defaults to 0
     
     Returns:
         - [H+] in umol/kg
@@ -1057,7 +1097,7 @@ def solver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kwar
     if temperature.size >= 1:
     
         # if TA.all() != None and pCO2.all() != None:
-        if 'TA' in kwargs and 'pCO2' in kwargs:
+        if 'TA' in kwargs and 'pCO2' in kwargs and 'DIC' not in kwargs:
             TA = kwargs.get('TA')
             pCO2 = kwargs.get('pCO2')
             data = pHsolver_TA_pCO2(TA = TA, 
@@ -1098,9 +1138,14 @@ def solver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kwar
                                    pH = pH)
         else: 
             raise KeyError('Insufficient arguments provided. Please provide either \n(A) TA and pCO2, \n(B) TA and DIC, \n(C) TA and pH, \n(D) DIC and pH or \n(E) pCO2 and pH.')
-            
+        
+        # If PO4 is provided
+        # Solve for pumps
         if 'PO4' in kwargs:
             PO4 = kwargs.get('PO4')
+            
+            if 'O2' in kwargs:
+                O2 = kwargs.get('O2')
             
             # Reference Salinity
             # Default = 35 PSU
@@ -1108,6 +1153,13 @@ def solver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kwar
                 PO4ref = kwargs.get('PO4ref')
             else:
                 PO4ref = 0.1
+                
+            # Reference Salinity
+            # Default = 35 PSU
+            if 't' in kwargs:
+                t = kwargs.get('t')
+            else:
+                t = 0
                 
             # Depth
             # Defaults to 0 for surface
@@ -1129,7 +1181,8 @@ def solver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kwar
             if 'Alkref' in kwargs:
                 Alkref = kwargs.get('Alkref')
             else:
-                Alkref = 2298 #umol/kg, Chen et al, 2022
+                Alkref = np.mean(TA)
+                # Alkref = 2298 #umol/kg, Chen et al, 2022
     
             # Reference salinity normalized DIC
             # Default = 1967 umol/kg
@@ -1137,8 +1190,14 @@ def solver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kwar
             if 'DICref' in kwargs:
                 DICref = kwargs.get('DICref')
             else:
-                DICref = 1967 #umol/kg, Chen et al, 2022
-    
+                DICref = np.mean(DIC)
+                # DICref = 1967 #umol/kg, Chen et al, 2022
+                
+            if 'CFC12' in kwargs:
+                CFC12 = kwargs.get('CFC12')
+            elif 'CFC-12' in kwargs:
+                CFC12 = kwargs.get('CFC-12')
+                
             # Estimation of Cant in the surface ocean
             # https://bg.copernicus.org/articles/10/2169/2013/bg-10-2169-2013.pdf
             # S. Khatiwala et al (2013, Biogeosciences): See figure 4
@@ -1146,11 +1205,23 @@ def solver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kwar
                 Cant = kwargs.get('Cant')
             else:
                 Cant = 40
-                
-            data2 = pumpsPO4(data['TA'], data['DIC'], temperature, salinity, PO4, 
-                          Sref = Sref, Alkref = Alkref, DICref = DICref, Cant = Cant, PO4ref = PO4ref, z = z)
             
-        elif 'O2' in kwargs:
+            # Reference to year 1950
+            # https://agupubs.onlinelibrary.wiley.com/doi/epdf/10.1029/1999JC900273
+            # Walker et al (2000, JGR: Oceans)
+            if 'CFC12ref' in kwargs:
+                CFC12ref = kwargs.get('CFC12ref')
+                
+            # To use TTD method for Cant you need:
+            # CFC12, CFC12ref, O2, t
+            if 'CFC12' in kwargs and 'CFC12ref' in kwargs and 'O2' in kwargs and 't' in kwargs:
+                data2 = pumpsPO4(data['TA'], data['DIC'], temperature, salinity, PO4, 
+                                Sref = Sref, Alkref = Alkref, DICref = DICref, CFC12 = CFC12, CFC12ref = CFC12ref, PO4ref = PO4ref, z = z, O2 = O2, t = t)
+            else:    
+                data2 = pumpsPO4(data['TA'], data['DIC'], temperature, salinity, PO4, 
+                                Sref = Sref, Alkref = Alkref, DICref = DICref, Cant = Cant, PO4ref = PO4ref, z = z)
+            
+        elif 'O2' in kwargs and 'PO4' not in kwargs:
             O2 = kwargs.get('O2')
             
             # Depth
@@ -1173,7 +1244,8 @@ def solver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kwar
             if 'Alkref' in kwargs:
                 Alkref = kwargs.get('Alkref')
             else:
-                Alkref = 2298 #umol/kg, Chen et al, 2022
+                Alkref = np.mean(TA)
+                # Alkref = 2298 #umol/kg, Chen et al, 2022
     
             # Reference salinity normalized DIC
             # Default = 1967 umol/kg
@@ -1181,7 +1253,8 @@ def solver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kwar
             if 'DICref' in kwargs:
                 DICref = kwargs.get('DICref')
             else:
-                DICref = 1967 #umol/kg, Chen et al, 2022
+                DICref = np.mean(DIC)
+                # DICref = 1967 #umol/kg, Chen et al, 2022
     
             # Estimation of Cant in the surface ocean
             # https://bg.copernicus.org/articles/10/2169/2013/bg-10-2169-2013.pdf
@@ -1200,7 +1273,51 @@ def solver(temperature = None, salinity = None, pHhi = None, pHlo = None, **kwar
 
     return DATA
 
+# Pump calculations using O2
 def pumps(TA, DIC, T, S, O2, **kwargs):
+    """
+    pumps(TA, DIC, T, S, O2, **kwargs)
+    kwargs
+        - Sref -- defaults to 35 PSU
+        - "Alkref" -- defaults to the mean of input TA
+        - "DICref" -- defaults to the mean of input DIC
+        - "Cant" for surface Cant -- defaults to 40 umol/kg
+        - "z" for depth in meters -- defaults to 0
+    
+    This function calculates the carbon pump components using O2.
+        - dCsoft = 117C/150O2 * AOU
+        - dTAsoft = -17(N+P)/150O2 * AOU
+        - dCcarb = 0.5 * (sAlk - sAlkref)
+        - dTAcarb = sAlk - sAlkref - dTAsoft
+        - C_ant = Cant * np.exp(0.003 * (-1 * z))
+        - dCgas = sDIC - sDICref - Cant - dCsoft - dCcarb
+        - dTAgas = -TAtoC * dCgas
+        
+    Returns
+        -'S_ref': reference salinity
+        - 'sDIC': salinity normalized DIC [umol/kg]
+        - 'sDIC_ref': salinity normalized reference DIC [umol/kg]
+        - 'sAlk': salinity normalized alkalinity [umol/kg]
+        - 'sAlk_ref': salinity normalized reference alkalinity [umol/kg]
+        - 'C_ant': anthropogenic carbon [umol/kg]
+        - '∆C_soft': change in carbon from soft tissue pump
+        - '∆TA_soft': change in alkalinity from soft tissue pump
+        - 'O2_sat': O2 saturation
+        - 'AOU': apparent oxygen utilization
+        - '∆C_carb': change in carbon from carbonate pump [umol/kg]
+        - '∆TA_carb': change in alkalinity from carbonate pump [umol/kg]
+        - '∆C_gasex': change in carbon from solubility and gas exchange [umol/kg]
+        - '∆TA_gasex': change in alkalinity from solubility and gas exchange [umol/kg]
+        - 'C:O2'
+        - 'TA:O2'
+        - 'TA:C'
+        
+    References: 
+        - Khatiwala, S., Tanhua, T., Mikaloff Fletcher, S., Gerber, M., Doney, S. C., Graven, H. D., ... & Sabine, C. L. (2013). Global ocean storage of anthropogenic carbon. Biogeosciences, 10(4), 2169-2191.
+        - Sarmiento, J. L. & Gruber, N. (2006). Ocean biogeochemical dynamics. Princeton university press.
+        - Chen, H., Haumann, F. A., Talley, L. D., Johnson, K. S., & Sarmiento, J. L. (2022). The deep ocean's carbon exhaust. Global biogeochemical cycles, 36(7), e2021GB007156.
+        - Garcia, H. E., & Gordon, L. I. (1992). Oxygen solubility in seawater: Better fitting equations. Limnology and oceanography, 37(6), 1307-1312.
+    """
     
     # Reference Salinity
     # Default = 35 PSU
@@ -1215,7 +1332,8 @@ def pumps(TA, DIC, T, S, O2, **kwargs):
     if 'Alkref' in kwargs:
         Alkref = kwargs.get('Alkref')
     else:
-        Alkref = 2298 #umol/kg, Chen et al, 2022
+        Alkref = np.mean(TA)
+        # Alkref = 2298 #umol/kg, Chen et al, 2022
     
     # Reference salinity normalized DIC
     # Default = 1967 umol/kg
@@ -1223,7 +1341,8 @@ def pumps(TA, DIC, T, S, O2, **kwargs):
     if 'DICref' in kwargs:
         DICref = kwargs.get('DICref')
     else:
-        DICref = 1967 #umol/kg, Chen et al, 2022
+        DICref = np.mean(DIC)
+        # DICref = 1967 #umol/kg, Chen et al, 2022
     
     # Estimation of Cant in the surface ocean
     # https://bg.copernicus.org/articles/10/2169/2013/bg-10-2169-2013.pdf
@@ -1244,6 +1363,7 @@ def pumps(TA, DIC, T, S, O2, **kwargs):
     DIC = correct_dataarray(DIC)
     O2 = correct_dataarray(O2)
     
+    # Calculate O2 saturations and AOU
     O2sat = o2sat(T,S)
     AOU = O2sat - O2
     
@@ -1308,6 +1428,72 @@ def pumps(TA, DIC, T, S, O2, **kwargs):
     return data2
 
 def pumpsPO4(TA, DIC, T, S, PO4, **kwargs):
+    """
+    pumpsPO4(TA, DIC, T, S, PO4, **kwargs)
+    kwargs
+        - Sref -- defaults to 35 PSU
+        - "PO4ref" -- defaults to 0.1
+        - "Alkref" -- defaults to the mean of input TA
+        - "DICref" -- defaults to the mean of input DIC
+        - "z" for depth in meters -- defaults to 0
+        - For TTD calculation for Cant
+            - "CFC12"
+            - "CFC12ref" referenced to 1950
+            - "O2" 
+            - "t" for time in years
+            
+    
+    This function calculates the carbon pump components using PO4.
+        - sX = (X/S) * Sref
+        - ∆X = sX − sXref 
+        - ∆DICsoft = (C/P) * ∆PO4
+        - ∆Alksoft = (-N/C) * ∆DICsoft
+        - ∆Alkcarb = ∆Alk - ∆Alksoft
+        - ∆DICcarb = 0.5 ∆Alkcarb
+        - Cant TTD
+            - Cant0 = C(T,S,Alk0,pCO2 = 410ppm) - C(T,S,Alk0,pCO2 = 280ppm)
+            - G = CFC12/(CFC12ref * (t - 1950))
+            - C_ant = Cant0 * G * (t - 1850)
+        - Cant parameterization
+            - C_ant = Cant * np.exp(0.003 * (-1 * z))
+        - dCgas = sDIC - sDICref - Cant - dCsoft - dCcarb
+        - dTAgas = -TAtoC * dCgas
+        
+    Returns
+        - 'S_ref': reference salinity
+        - 'sDIC': salinity normalized DIC [umol/kg]
+        - 'sDIC_ref': salinity normalized reference DIC [umol/kg]
+        - 'sAlk': salinity normalized alkalinity [umol/kg]
+        - 'sAlk_ref': salinity normalized reference alkalinity [umol/kg]
+        - 'C_ant': anthropogenic carbon [umol/kg]
+        - '∆C_soft': change in carbon from soft tissue pump
+        - '∆TA_soft': change in alkalinity from soft tissue pump
+        - 'O2_sat': O2 saturation
+        - 'AOU': apparent oxygen utilization
+        - '∆C_carb': change in carbon from carbonate pump [umol/kg]
+        - '∆TA_carb': change in alkalinity from carbonate pump [umol/kg]
+        - '∆C_gasex': change in carbon from solubility and gas exchange [umol/kg]
+        - '∆TA_gasex': change in alkalinity from solubility and gas exchange [umol/kg]
+        - 'C:O2'
+        - 'TA:O2'
+        - 'TA:C'
+        
+    References: 
+        - Khatiwala, S., Tanhua, T., Mikaloff Fletcher, S., Gerber, M., Doney, S. C., Graven, H. D., ... & Sabine, C. L. (2013). Global ocean storage of anthropogenic carbon. Biogeosciences, 10(4), 2169-2191.
+        - Sarmiento, J. L. & Gruber, N. (2006). Ocean biogeochemical dynamics. Princeton university press.
+        - Chen, H., Haumann, F. A., Talley, L. D., Johnson, K. S., & Sarmiento, J. L. (2022). The deep ocean's carbon exhaust. Global biogeochemical cycles, 36(7), e2021GB007156.
+        - Walker, S. J., Weiss, R. F., & Salameh, P. K. (2000). Reconstructed histories of the annual mean atmospheric mole fractions for the halocarbons CFC‐11 CFC‐12, CFC‐113, and carbon tetrachloride. Journal of Geophysical Research: Oceans, 105(C6), 14285-14296.
+        - Gruber, N., Sarmiento, J. L., & Stocker, T. F. (1996). An improved method for detecting anthropogenic CO2 in the oceans. Global Biogeochemical Cycles, 10(4), 809-837.
+        - Waugh, D. W., Hall, T. M., McNeil, B. I., Key, R., & Matear, R. J. (2006). Anthropogenic CO2 in the oceans estimated using transit time distributions. Tellus B: Chemical and Physical Meteorology, 58(5), 376-389.
+        - Broecker, W. S. (1974). “NO”, a conservative water-mass tracer. Earth and Planetary Science Letters, 23(1), 100-107.
+    """
+    
+    TA = correct_dataarray(TA)
+    T = correct_dataarray(T)
+    S = correct_dataarray(S)
+    DIC = correct_dataarray(DIC)
+    PO4 = correct_dataarray(PO4)
+    
     
     if 'PO4ref' in kwargs:
         PO4ref = kwargs.get('PO4ref')
@@ -1320,6 +1506,11 @@ def pumpsPO4(TA, DIC, T, S, PO4, **kwargs):
         Sref = kwargs.get('Sref')
     else:
         Sref = 35
+        
+    # pCO2
+    # Default = 410 ppm
+    pCO2 = np.zeros(len(TA))
+    pCO2[:] = 410
     
     # Reference salinity normalized alkalinity
     # Default = 2298 umol/kg
@@ -1337,6 +1528,23 @@ def pumpsPO4(TA, DIC, T, S, PO4, **kwargs):
     else:
         DICref = 1967 #umol/kg, Chen et al, 2022
     
+    if 'CFC12' in kwargs:
+        CFC12 = kwargs.get('CFC12')
+        CFC12 = correct_dataarray(CFC12)
+          
+    # Reference to year 1950
+    # https://agupubs.onlinelibrary.wiley.com/doi/epdf/10.1029/1999JC900273
+    # Walker et al (2000, JGR: Oceans)
+    # Currently uses Southern Hemisphere CFC12 in 1950
+    if 'CFC12ref' in kwargs:
+        CFC12ref = kwargs.get('CFC12ref')
+    else: 
+        CFC12ref = 5.9
+        
+    if 'O2' in kwargs:
+        O2 = kwargs.get('O2')
+        O2 = correct_dataarray(O2)
+
     # Estimation of Cant in the surface ocean
     # https://bg.copernicus.org/articles/10/2169/2013/bg-10-2169-2013.pdf
     # S. Khatiwala et al (2013, Biogeosciences): See figure 4
@@ -1349,12 +1557,11 @@ def pumpsPO4(TA, DIC, T, S, PO4, **kwargs):
         z = kwargs.get('z')
     else:
         z = 0
-    
-    TA = correct_dataarray(TA)
-    T = correct_dataarray(T)
-    S = correct_dataarray(S)
-    DIC = correct_dataarray(DIC)
-    PO4 = correct_dataarray(PO4)
+        
+    if 't' in kwargs:
+        t = kwargs.get('t')
+    else:
+        t = 0
     
     # Redfield ratio 
     # C:N:P:O2
@@ -1364,7 +1571,7 @@ def pumpsPO4(TA, DIC, T, S, PO4, **kwargs):
     P = 1
     O = 150
     CtoP = C/P
-    NtoC = N/C
+    TAtoC = (N+P)/C
     PtoO2 = P/O
     TAtoO2 = (N + P)/O
     TAtoC = (N + P)/C
@@ -1373,11 +1580,19 @@ def pumpsPO4(TA, DIC, T, S, PO4, **kwargs):
     # nX = (X/S) * Sref
     # Sarmiento & Gruber (2006) and Chen et al (2022) use Sref = 35
     sDIC = (DIC/S) * Sref
-    sDICref = (DICref/S) * Sref
+    # sDICref = sDIC.mean()
+    # sDICref = (DICref/S) * Sref
+    sDICref = DICref
     sAlk = (TA/S) * Sref
-    sAlkref = (Alkref/S) * Sref
+    sAlkref = Alkref
+    # sAlkref = (Alkref/S) * Sref
     sPO4 = (PO4/S) * Sref
     sPO4ref = (PO4ref/S) * Sref
+    
+    # Preformed Alkalinity
+    # Gruber et al (1996, Global Biogeochem. Cycles)
+    if 'O2' in kwargs:
+        alk0 = preformed_alkalinity(S, O2, PO4)
     
     # Deviation from reference value
     # ∆X = sX − sXref (Chen et al, 2022)
@@ -1389,20 +1604,7 @@ def pumpsPO4(TA, DIC, T, S, PO4, **kwargs):
     # ∆DICsoft = (C/P) * ∆PO4
     # ∆Alksoft = (-N/C) * ∆DICsoft
     dCsoft = CtoP * dPO4
-    dTAsoft = -NtoC * dCsoft
-    
-#     # From Chen et al:
-#     # "In order to illustrate this process, 
-#     # we here compute the fraction of the soft-tissue pump 
-#     # that is associated with directly accumulated carbon (Faccum) 
-#     # and the fraction that is associated with recirculated carbon (Frecirc) 
-#     # using the apparent oxygen utilization (AOU) following Williams and Follows (2011) as:
-#     # Faccum = ((P/O)*AOU)/dPO4
-#     # Frecirc = 1 - Faccum
-#     O2sat = o2sat(T,S)
-#     AOU = O2sat - O2
-#     Faccum = (PtoO2 * AOU)/dPO4
-#     Frecirc = 1 - Faccum
+    dTAsoft = -TAtoC * dCsoft
     
     # Carbonate pump
     # ∆Alkcarb = ∆Alk - ∆Alksoft
@@ -1410,12 +1612,35 @@ def pumpsPO4(TA, DIC, T, S, PO4, **kwargs):
     dTAcarb = dTA - dTAsoft
     dCcarb = 0.5 * dTAcarb
     
-    # Gas exchange
-    dCgas = sDIC - sDICref - Cant - dCsoft - dCcarb
-    dTAgas = -TAtoC * dCgas
     
     # Calculate Cant with depth
-    C_ant = Cant * np.exp(0.003 * (-1 * z))
+    if 'CFC12' not in kwargs: # or 'O2' not in kwargs or 't' not in kwargs:
+        C_ant = Cant * np.exp(0.003 * (-1 * z))
+    else:
+        # C(T,S,Alk0,pCO2 = 410ppm)
+        Ceq1 = solver(TA = alk0, pCO2 = pCO2, 
+                     temperature = T, salinity = S)
+        ceq1 = Ceq1['DIC']
+        # C(T,S,Alk0,pCO2 = 280ppm)
+        ppm = np.zeros(len(pCO2))
+        ppm[:] = 280
+        Ceq2 = solver(TA = alk0, pCO2 = ppm, 
+                     temperature = T, salinity = S)
+        ceq2 = Ceq2['DIC']
+        # Cant0 = C(T,S,Alk0,pCO2 = 410ppm) - C(T,S,Alk0,pCO2 = 280ppm)
+        Cant0 = ceq1 - ceq2
+        
+        # TTD for CFC integrates from 1950 to no
+        CFC12_0 = CFC12ref
+        dt = t - 1950
+        G = CFC12/(CFC12_0 * dt)
+        
+        ## TTD for Cant integrates from 1850 to now
+        C_ant = Cant0 * G 
+        
+    # Gas exchange
+    dCgas = sDIC - DICref - C_ant - dCsoft - dCcarb
+    dTAgas = -TAtoC * dCgas
     
     data2 = {
         'S_ref': Sref,
@@ -1432,7 +1657,10 @@ def pumpsPO4(TA, DIC, T, S, PO4, **kwargs):
         '∆TA_gasex': dTAgas,
         'sPO4': sPO4,
         'sPO4ref': sPO4ref,
-        '∆PO4': dPO4
+        '∆PO4': dPO4,
+        'dDIC': dDIC,
+        'G': G,
+        'Cant0': Cant0,
         }
     return data2
 
@@ -1524,6 +1752,24 @@ def density_1atm(T,S):
     rho = rho0 + (A * S) + (B * np.power(S, 1.5)) + (C * S)
     
     return rho
+
+def preformed_alkalinity(S, O2, PO4):
+    """
+    Calculate preformed alkalinity
+    
+    Source: https://agupubs.onlinelibrary.wiley.com/doi/epdf/10.1029/96GB01608
+    Gruber, N., Sarmiento, J. L., and Stocker, T. F. (1996), An improved method for detecting anthropogenic CO2 in the oceans, Global Biogeochem. Cycles, 10(4), 809–837, doi:10.1029/96GB01608. 
+    """
+    # S = kwargs.get('S')
+    # O2 = kwargs.get('O2')
+    # PO4 = kwargs.get('PO4')
+    
+    S = np.asarray(S)
+    O2 = np.asarray(O2)
+    PO4 = np.asarray(PO4)
+    Alk0 = 367.5 + 54.9 * S + 0.074 * (O2 + 150 * PO4)
+    
+    return Alk0
     
     
     
